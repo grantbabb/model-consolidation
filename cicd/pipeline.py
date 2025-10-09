@@ -14,7 +14,8 @@ from sagemaker.workflow.parameters import (
 from sagemaker.sklearn.processing import SKLearnProcessor
 from sagemaker.processing import ProcessingOutput
 from sagemaker.workflow.pipeline_context import PipelineSession
-from sagemaker.automl.automl import AutoML, AutoMLInput
+from sagemaker.automl.automl import AutoMLInput
+from sagemaker.automl.automlv2 import AutoMLV2, AutoMLTabularConfig
 from sagemaker.tuner import HyperparameterTuner, ContinuousParameter, IntegerParameter
 from sagemaker.estimator import Estimator
 from sagemaker.inputs import TrainingInput
@@ -77,13 +78,29 @@ def get_pipeline(region: str, role: str) -> Pipeline:
     )
 
     # Step 2: AutoML to get best candidate
-    automl = AutoML(
+#    automl = AutoML(
+#        role=role,
+#        target_attribute_name=target_column,
+#        output_path=automl_s3_output,
+#        sagemaker_session=sagemaker_session,
+#        problem_type="BinaryClassification",
+#        job_objective=AutoMLJobObjective(metric_name="AUC"),
+#        max_candidates=10,
+#    )
+
+    problem_config = AutoMLTabularConfig(
+        target_attribute_name='user_ churned',
+        problem_type='BinaryClassification', # Or 'Regression', 'BinaryClassification'
+        
+    )
+
+    automl = AutoMLV2(
         role=role,
-        target_attribute_name=target_column,
-        output_path=automl_s3_output,
         sagemaker_session=sagemaker_session,
-        problem_type="BinaryClassification",
-        max_candidates=10,
+        base_job_name='my-automl-job',
+        problem_config=problem_config,
+        output_path=automl_s3_output,
+        job_objective={'MetricName': 'Accuracy'}
     )
 
     automl_input = AutoMLInput(
@@ -91,12 +108,15 @@ def get_pipeline(region: str, role: str) -> Pipeline:
         target_attribute_name=target_column,
     )
 
-    automl_step = AutoMLStep(
-        name="AutoModel",
-        automl=automl,
-        inputs=automl_input,
-        job_name=automl_job_name,
-    )
+    step_args = automl.fit(inputs=automl_input, job_name='my-automl-job')
+    automl_step = AutoMLStep(name="AutoModel", step_args=step_args)
+
+#    automl_step = AutoMLStep(
+#        name="AutoModel",
+#        automl=automl,
+#        inputs=automl_input,
+#        job_name=automl_job_name,
+#    )
 
     # Step 3: Hyperparameter Tuning (HPO) with XGBoost
     xgb_image_uri = image_uris.retrieve(framework="xgboost", region=region, version="1.5-1")
@@ -186,3 +206,4 @@ def get_pipeline(region: str, role: str) -> Pipeline:
 def pipeline_definition(region: str, role: str) -> Dict:
     return get_pipeline(region, role).definition()
 
+pipeline_definition('us-west-2', 'arn:aws:iam::063299843915:role/service-role/AmazonSageMaker-ExecutionRole-20250522T112887')
