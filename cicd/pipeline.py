@@ -4,7 +4,7 @@ from typing import Dict
 import boto3
 from sagemaker.workflow.pipeline import Pipeline
 from sagemaker.workflow.automl_step import AutoMLStep
-from sagemaker.workflow.tuning_step import TuningStep
+from sagemaker.workflow.steps import TuningStep
 from sagemaker.workflow.step_collections import RegisterModel
 from sagemaker.workflow.parameters import (
     ParameterString,
