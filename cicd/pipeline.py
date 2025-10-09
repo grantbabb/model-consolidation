@@ -31,7 +31,7 @@ def get_pipeline(region: str, role: str) -> Pipeline:
     sagemaker_session = get_session(region)
 
     # Parameters
-    feature_group_name = ParameterString(name="FeatureGroupName", default_value="my-feature-group")
+    feature_group_name = ParameterString(name="FeatureGroupName", default_value="churn_aws_fg-20251009-163549")
     target_column = ParameterString(name="TargetColumn", default_value="target")
     event_time_after = ParameterString(name="EventTimeAfter", default_value="")
     event_time_column = ParameterString(name="EventTimeColumn", default_value="event_time")
@@ -39,8 +39,8 @@ def get_pipeline(region: str, role: str) -> Pipeline:
     processing_instance_type = ParameterString(name="ProcessingInstanceType", default_value="ml.m5.large")
     processing_instance_count = ParameterInteger(name="ProcessingInstanceCount", default_value=1)
     automl_job_name = ParameterString(name="AutoMLJobName", default_value="automl-job")
-    automl_s3_output = ParameterString(name="AutoMLS3Output", default_value="s3://my-bucket/automl-output/")
-    training_output_s3 = ParameterString(name="TrainingOutputS3", default_value="s3://my-bucket/train-output/")
+    automl_s3_output = ParameterString(name="AutoMLS3Output", default_value="s3://datasets-in-out/automl-output/")
+    training_output_s3 = ParameterString(name="TrainingOutputS3", default_value="s3://datasets-in-out/train-output/")
     max_parallel_jobs = ParameterInteger(name="MaxParallelJobs", default_value=5)
 
     # Step 1: Feature Store read via Processing
