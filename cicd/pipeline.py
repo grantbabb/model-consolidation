@@ -14,7 +14,7 @@ from sagemaker.workflow.parameters import (
 from sagemaker.sklearn.processing import SKLearnProcessor
 from sagemaker.processing import ProcessingOutput
 from sagemaker.workflow.pipeline_context import PipelineSession
-from sagemaker.automl.automl import AutoML, AutoMLInput
+from sagemaker.automl.automl import AutoML, AutoMLInput, AutoMLJobObjective
 from sagemaker.tuner import HyperparameterTuner, ContinuousParameter, IntegerParameter
 from sagemaker.estimator import Estimator
 from sagemaker.inputs import TrainingInput
@@ -83,6 +83,7 @@ def get_pipeline(region: str, role: str) -> Pipeline:
         output_path=automl_s3_output,
         sagemaker_session=sagemaker_session,
         problem_type="BinaryClassification",
+        job_objective=AutoMLJobObjective(metric_name="AUC"),
         max_candidates=10,
     )
 
