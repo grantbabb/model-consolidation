@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Trigger SageMaker Pipeline on Offline Feature Store (S3) changes via EventBridge + Lambda
+
+Parameters:
+  OfflineStoreBucket:
+    Type: String
+    Description: S3 bucket name for SageMaker Feature Store offline store
+  OfflineStorePrefix:
+    Type: String
+    Description: S3 prefix within the bucket to watch (e.g., feature-store/offline/)
+    Default: feature-store/offline/
+  SageMakerPipelineName:
+    Type: String
+    Description: Name of the SageMaker Pipeline to start
+  LambdaTimeoutSeconds:
+    Type: Number
+    Default: 60
+    MinValue: 3
+    MaxValue: 900
+  LambdaMemoryMB:
+    Type: Number
+    Default: 256
+    MinValue: 128
+    MaxValue: 10240
+
+Mappings: {}
+
+Resources:
+  PipelineTriggerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: lambda-logs-and-pipeline-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - sagemaker:StartPipelineExecution
+                  - sagemaker:ListPipelineExecutions
+                Resource: '*'
+
+  PipelineTriggerFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: !Ref LambdaTimeoutSeconds
+      MemorySize: !Ref LambdaMemoryMB
+      Role: !GetAtt PipelineTriggerRole.Arn
+      Environment:
+        Variables:
+          PIPELINE_NAME: !Ref SageMakerPipelineName
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+
+          sagemaker = boto3.client('sagemaker')
+
+          def _extract_s3_event_records(event):
+            records = []
+            # EventBridge S3 Object Created detail format or S3 Put event format
+            if 'detail' in event and 'bucket' in event['detail']:
+              # EventBridge S3 notification
+              bucket = event['detail'].get('bucket', {}).get('name')
+              object_key = event['detail'].get('object', {}).get('key')
+              if bucket and object_key:
+                records.append((bucket, object_key))
+            elif 'Records' in event:
+              for r in event['Records']:
+                b = r.get('s3', {}).get('bucket', {}).get('name')
+                k = r.get('s3', {}).get('object', {}).get('key')
+                if b and k:
+                  records.append((b, k))
+            return records
+
+          def handler(event, context):
+            pipeline_name = os.environ['PIPELINE_NAME']
+            records = _extract_s3_event_records(event)
+
+            if not records:
+              # Fallback: start anyway if triggered without specific records
+              response = sagemaker.start_pipeline_execution(
+                PipelineName=pipeline_name,
+                PipelineExecutionDisplayName=f"auto-trigger-unknown-{context.aws_request_id}"
+              )
+              return {"status": "started", "executionArn": response.get('PipelineExecutionArn')}
+
+            # Optionally dedupe multiple object creates into one execution
+            response = sagemaker.start_pipeline_execution(
+              PipelineName=pipeline_name,
+              PipelineParameters=[
+                {"Name": "TriggerObjectCount", "Value": str(len(records))}
+              ],
+              PipelineExecutionDisplayName=f"auto-trigger-{context.aws_request_id}"
+            )
+            return {"status": "started", "executionArn": response.get('PipelineExecutionArn'), "numRecords": len(records)}
+
+  # Use EventBridge (recommended) rather than S3 Lambda notification directly for flexibility
+  OfflineStoreObjectCreatedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Match S3 object creation events under the offline store prefix
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - !Ref OfflineStoreBucket
+          object:
+            key:
+              # Prefix match using startsWith condition
+              - prefix: !Ref OfflineStorePrefix
+      Targets:
+        - Arn: !GetAtt PipelineTriggerFn.Arn
+          Id: PipelineTriggerFnTarget
+
+  AllowEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PipelineTriggerFn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt OfflineStoreObjectCreatedRule.Arn
+
+Outputs:
+  RuleArn:
+    Description: EventBridge rule ARN
+    Value: !GetAtt OfflineStoreObjectCreatedRule.Arn
+  LambdaArn:
+    Description: Pipeline trigger Lambda ARN
+    Value: !GetAtt PipelineTriggerFn.Arn
